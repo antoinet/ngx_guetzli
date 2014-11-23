@@ -1,16 +1,18 @@
 #!/bin/bash
 
-pushd "vendor"
-pushd "nginx-1.4.7"
-CFLAGS="-g -O0" ./configure                \
-  --with-debug                             \
-  --prefix=$(pwd)/../../build/nginx        \
-  --conf-path=conf/nginx.conf              \
-  --error-log-path=logs/error.log          \
-  --http-log-path=logs/access.log          \
-  --add-module=../../
+. `dirname $0`/common
+
+pushd "vendor/nginx-$NGINX_VERSION"
+if [ ! -f Makefile ]; then
+  CFLAGS="-g -O0" ./configure                \
+    --with-debug                             \
+    --prefix=$(pwd)/../../build/nginx        \
+    --conf-path=conf/nginx.conf              \
+    --error-log-path=logs/error.log          \
+    --http-log-path=logs/access.log          \
+    --add-module=../../
+fi
 make
 make install
-popd
 popd
 

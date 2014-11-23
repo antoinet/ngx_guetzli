@@ -17,6 +17,9 @@ namespace :nginx do
     `build/nginx/sbin/nginx -s stop`
   end
 
+  desc "Stops and starts NGINX"
+  task :restart => ["nginx:stop", "nginx:start"]
+
   desc "Recompiles NGINX"
   task :compile do
     sh "script/compile"
