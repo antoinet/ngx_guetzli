@@ -37,6 +37,7 @@ static void* ngx_http_guetzli_create_loc_conf(ngx_conf_t *cf);
 static char* ngx_http_guetzli_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child);
 static ngx_int_t ngx_http_guetzli_filter(ngx_http_request_t *r);
 static void append_debug_header(ngx_http_request_t *r, ngx_str_t *hdr_value);
+static ngx_int_t ngx_http_guetzli_set_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *conf); 
 static ngx_int_t lookup_session_cookie(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *guetzli_sess, ngx_str_t *guetzli_values);
 
 
@@ -105,7 +106,7 @@ ngx_http_guetzli_init(ngx_conf_t *cf)
 {
     ngx_http_next_header_filter = ngx_http_top_header_filter;
     ngx_http_top_header_filter = ngx_http_guetzli_filter;
-    return NGX_CONF_OK;
+    return NGX_OK;
 }
 
 static void*
@@ -165,18 +166,27 @@ ngx_http_guetzli_filter(ngx_http_request_t *r)
         return ngx_http_next_header_filter(r);
     }
 
-    ngx_int_t lookup;
-    ngx_str_t sess_cookie;
-    lookup = ngx_http_parse_multi_header_lines(&r->headers_in.cookies, &conf->cookie_name, &sess_cookie);
+    ngx_int_t rc;
+    rc = ngx_http_guetzli_set_cookie(r, conf);
 
-  if (lookup != NGX_DECLINED) {
-      ngx_str_t values;
-      ngx_int_t lookup_result = lookup_session_cookie(conf, &sess_cookie, &values);
-      
-      if (lookup_result != NGX_DECLINED) {
-          append_debug_header(r, &values);
-      }
-  }
+    if (rc != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    /*
+    ngx_int_t rc;
+    ngx_str_t sess_cookie;
+    rc = ngx_http_parse_multi_header_lines(&r->headers_in.cookies, &conf->cookie_name, &sess_cookie);
+    
+    if (rc != NGX_DECLINED) {
+        ngx_str_t values;
+        rc = lookup_session_cookie(conf, &sess_cookie, &values);
+        
+        if (rc != NGX_DECLINED) {
+            append_debug_header(r, &values);
+        }
+    }
+    */
 
   return ngx_http_next_header_filter(r);
 }
@@ -208,3 +218,43 @@ lookup_session_cookie(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *sess_cookie,
     }
 }
 
+static ngx_int_t
+ngx_http_guetzli_set_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *conf)
+{
+    u_char *cookie, *p;
+    size_t len;
+    ngx_table_elt_t *set_cookie;
+    ngx_str_t cookie_suffix = ngx_string(";secure;HttpOnly");
+
+    len = conf->cookie_name.len + 1 + 32 + cookie_suffix.len;
+
+    cookie = ngx_pnalloc(r->pool, len);
+    if (cookie == NULL) {
+        return NGX_ERROR;
+    }
+
+    p = ngx_copy(cookie, conf->cookie_name.data, conf->cookie_name.len);
+    *p++ = '=';
+
+    uuid_t uuid;
+    uuid_generate_random(uuid);
+    ngx_hex_dump(p, (u_char *)uuid, 16);
+    p += 32;
+
+    p = ngx_copy(p, cookie_suffix.data, cookie_suffix.len);
+
+    set_cookie = ngx_list_push(&r->headers_out.headers);
+    if (set_cookie == NULL) {
+        return NGX_ERROR;
+    }
+
+    set_cookie->hash = 1;
+    ngx_str_set(&set_cookie->key, "Set-Cookie");
+    set_cookie->value.len = p - cookie;
+    set_cookie->value.data = cookie;
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+        "set cookie: \"%V\"", &set_cookie->value);
+
+    return NGX_OK;
+}
