@@ -1,5 +1,41 @@
-CORE_LIBS="$CORE_LIBS -lhiredis"
-ngx_addon_name=ngx_http_guetzli_module
-HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_http_guetzli_module"
-NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_guetzli_module.c"
+ngx_feature="uuid"
+ngx_feature_name=
+ngx_feature_run=no
+ngx_feature_incs="#include <uuid/uuid.h>"
+ngx_feature_path="/usr/include/uuid"
+ngx_feature_libs="-luuid"
+ngx_feature_test=
+. auto/feature
+
+if [ $ngx_found = no ]; then
+    cat << EOF
+$0: error: unable to configure the ngx_http_guetzli_filter_module.
+missing dependency: uuid
+EOF
+    exit 1
+fi
+
+
+ngx_feature="hiredis"
+ngx_feature_name=
+ngx_feature_run=no
+ngx_feature_incs="#include <hiredis/hiredis.h>"
+ngx_feature_path="/usr/include/hiredis"
+ngx_feature_libs="-lhiredis"
+ngx_feature_test=
+. auto/feature
+
+if [ $ngx_found = no ]; then
+    cat << EOF
+$0: error: unable to configure the ngx_http_guetzli_filter_module.
+missing dependency: hiredis
+EOF
+    exit 1
+fi
+
+ngx_addon_name=ngx_http_guetzli_filter_module
+CORE_LIBS="$CORE_LIBS -luuid -lhiredis"
+ngx_addon_name=ngx_http_guetzli_filter_module
+HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_http_guetzli_filter_module"
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_guetzli_filter_module.c"
 

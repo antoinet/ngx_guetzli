@@ -1,5 +1,5 @@
 /*
- * ngx_http_guetzli_module
+ * ngx_http_guetzli_filter_module
  *
  * (c) 2014 Antoine Neuenschwander <antoine@schoggi.org>
  */
@@ -10,15 +10,25 @@
 #include <ngx_http.h>
 
 #include <string.h>
-#include "hiredis/hiredis.h"
-
+#include <hiredis/hiredis.h>
+#include <uuid/uuid.h>
 
 /* module configuration structure */
 typedef struct {
-    ngx_str_t redis_host;
-    ngx_int_t redis_port;
-    ngx_str_t cookie_name;
+    ngx_str_t   redis_host;
+    ngx_int_t   redis_port;
+    ngx_str_t   cookie_name;
 } ngx_http_guetzli_loc_conf_t;
+
+
+/* representation of cookies */
+typedef struct {
+    ngx_str_t   name;
+    time_t      expires_time;
+    ngx_str_t   domain;
+    ngx_str_t   path;
+    ngx_http_complex_value_t* value;
+} ngx_guetzli_cookie_t;
 
 
 /* module functions */
@@ -61,7 +71,7 @@ static ngx_command_t ngx_http_guetzli_commands[] = {
 
 
 /* nginx http module definition */
-static ngx_http_module_t ngx_http_guetzli_module_ctx = {
+static ngx_http_module_t ngx_http_guetzli_filter_module_ctx = {
     NULL,                              /* preconfiguration */
     ngx_http_guetzli_init,             /* postconfiguration */
     NULL,                              /* create main configuration */
@@ -74,9 +84,9 @@ static ngx_http_module_t ngx_http_guetzli_module_ctx = {
 
 
 /* nginx module definition */
-ngx_module_t ngx_http_guetzli_module = {
+ngx_module_t ngx_http_guetzli_filter_module = {
     NGX_MODULE_V1,
-    &ngx_http_guetzli_module_ctx,      /* module context */
+    &ngx_http_guetzli_filter_module_ctx,      /* module context */
     ngx_http_guetzli_commands,         /* module directives */
     NGX_HTTP_MODULE,                   /* module type */
     NULL,                              /* init master */
@@ -143,7 +153,7 @@ ngx_http_guetzli_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child)
 static ngx_int_t
 ngx_http_guetzli_filter(ngx_http_request_t *r)
 {
-    ngx_http_guetzli_loc_conf_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_guetzli_module);
+    ngx_http_guetzli_loc_conf_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_guetzli_filter_module);
 
     if ( conf->cookie_name.len == 0
         || r->headers_out.status != NGX_HTTP_OK
