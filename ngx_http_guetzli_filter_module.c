@@ -13,6 +13,10 @@
 #include <hiredis/hiredis.h>
 #include <uuid/uuid.h>
 
+
+#define ODD(x) (x % 2)
+#define EVEN(x) ((x % 2) ^ 1)
+
 /* module configuration structure */
 typedef struct {
     ngx_str_t   redis_host;
@@ -36,10 +40,12 @@ static ngx_int_t ngx_http_guetzli_init(ngx_conf_t *cf);
 static void* ngx_http_guetzli_create_loc_conf(ngx_conf_t *cf);
 static char* ngx_http_guetzli_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child);
 static ngx_int_t ngx_http_guetzli_filter(ngx_http_request_t *r);
-static void append_debug_header(ngx_http_request_t *r, ngx_str_t *hdr_value);
-static ngx_int_t ngx_http_guetzli_set_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *conf); 
-static ngx_int_t lookup_session_cookie(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *guetzli_sess, ngx_str_t *guetzli_values);
-
+static ngx_int_t ngx_http_guetzli_set_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid); 
+static ngx_int_t ngx_http_guetzli_get_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid);
+static ngx_int_t redis_lookup_uuid(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid);
+static ngx_int_t redis_store_uuid(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid);
+static ngx_int_t uuid_verify(ngx_str_t *in);
+static ngx_int_t hex_decode(u_char *dst, u_char *src, size_t len);
 
 /* definition of configuration directives */
 static ngx_command_t ngx_http_guetzli_commands[] = {
@@ -154,7 +160,12 @@ ngx_http_guetzli_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child)
 static ngx_int_t
 ngx_http_guetzli_filter(ngx_http_request_t *r)
 {
-    ngx_http_guetzli_loc_conf_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_guetzli_filter_module);
+    ngx_int_t rc;
+    ngx_http_guetzli_loc_conf_t *conf;
+    uuid_t uuid;
+    ngx_str_t uuid_str;
+
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_guetzli_filter_module);
 
     if ( conf->cookie_name.len == 0
         || r->headers_out.status != NGX_HTTP_OK
@@ -166,60 +177,76 @@ ngx_http_guetzli_filter(ngx_http_request_t *r)
         return ngx_http_next_header_filter(r);
     }
 
-    ngx_int_t rc;
-    rc = ngx_http_guetzli_set_cookie(r, conf);
+    rc = ngx_http_guetzli_get_cookie(r, conf, &uuid_str);
+    if (rc == NGX_OK) {
+        rc = redis_lookup_uuid(conf, &uuid_str) == NGX_OK;
+        if (rc == NGX_OK) {
+            return ngx_http_next_header_filter(r);
+        }
+    }
+
+    uuid_generate_random(uuid);
+    uuid_str.data = ngx_pnalloc(r->pool, 33);
+    uuid_str.len = 32;
+    ngx_hex_dump(uuid_str.data, (u_char *)uuid, 16);
+    uuid_str.data[32] = '\0';
+
+    redis_store_uuid(conf, &uuid_str);
+    rc = ngx_http_guetzli_set_cookie(r, conf, &uuid_str);
 
     if (rc != NGX_OK) {
         return NGX_ERROR;
     }
 
-    /*
-    ngx_int_t rc;
-    ngx_str_t sess_cookie;
-    rc = ngx_http_parse_multi_header_lines(&r->headers_in.cookies, &conf->cookie_name, &sess_cookie);
-    
-    if (rc != NGX_DECLINED) {
-        ngx_str_t values;
-        rc = lookup_session_cookie(conf, &sess_cookie, &values);
-        
-        if (rc != NGX_DECLINED) {
-            append_debug_header(r, &values);
-        }
-    }
-    */
-
-  return ngx_http_next_header_filter(r);
-}
-
-
-
-static void
-append_debug_header(ngx_http_request_t *r, ngx_str_t *hdr_value)
-{
-    ngx_table_elt_t *h;
-    h = ngx_list_push(&r->headers_out.headers);
-    h->hash = 1;
-    ngx_str_set(&h->key, "X-Guetzli-Debug");
-    h->value = *hdr_value;
+    return ngx_http_next_header_filter(r);
 }
 
 
 static ngx_int_t
-lookup_session_cookie(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *sess_cookie, ngx_str_t *values)
+redis_lookup_uuid(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid)
 {
     redisContext *context = redisConnect((const char*)conf->redis_host.data, conf->redis_port);
-    redisReply *reply = redisCommand(context, "GET %s", sess_cookie->data);
+    redisReply *reply = redisCommand(context, "GET %s", uuid->data);
     if (reply->type == REDIS_REPLY_NIL) {
         return NGX_DECLINED;
     } else {
-        values->len = strlen(reply->str);
-        values->data = reply->str;
         return NGX_OK;
     }
 }
 
 static ngx_int_t
-ngx_http_guetzli_set_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *conf)
+redis_store_uuid(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid)
+{
+    redisContext *context = redisConnect((const char*)conf->redis_host.data, conf->redis_port);
+    redisReply *reply = redisCommand(context, "SET %s 1", uuid->data);
+    if (reply->type == REDIS_REPLY_ERROR) {
+        return NGX_DECLINED;
+    } else {
+        return NGX_OK;
+    }
+}
+
+static ngx_int_t
+ngx_http_guetzli_get_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid)
+{
+    ngx_int_t rc;
+ 
+    rc = ngx_http_parse_multi_header_lines(&r->headers_in.cookies,
+        &conf->cookie_name, uuid);
+
+    if (rc == NGX_DECLINED) {
+        return NGX_DECLINED;
+    }
+
+    if (uuid_verify(uuid) != NGX_OK) {
+        return NGX_DECLINED;
+    }
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_guetzli_set_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid)
 {
     u_char *cookie, *p;
     size_t len;
@@ -235,12 +262,7 @@ ngx_http_guetzli_set_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *
 
     p = ngx_copy(cookie, conf->cookie_name.data, conf->cookie_name.len);
     *p++ = '=';
-
-    uuid_t uuid;
-    uuid_generate_random(uuid);
-    ngx_hex_dump(p, (u_char *)uuid, 16);
-    p += 32;
-
+    p = ngx_copy(p, uuid->data, uuid->len);
     p = ngx_copy(p, cookie_suffix.data, cookie_suffix.len);
 
     set_cookie = ngx_list_push(&r->headers_out.headers);
@@ -255,6 +277,56 @@ ngx_http_guetzli_set_cookie(ngx_http_request_t *r, ngx_http_guetzli_loc_conf_t *
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
         "set cookie: \"%V\"", &set_cookie->value);
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+uuid_verify(ngx_str_t *in)
+{
+    ngx_int_t i;
+    const u_char *cp;
+
+    for (i = 0, cp = in->data; i < 32; i++, cp++) {
+        if (!isxdigit(*cp)) {
+            return NGX_ERROR;
+        }
+    }
+
+    if (*cp != '\0') {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+hex_decode(u_char *dst, u_char *src, size_t len)
+{
+    u_char c, ch;
+
+    if (ODD(len)) {
+       return NGX_ERROR;
+    }
+
+    while (len--) {
+        ch = *src++;
+
+        if (ch >= '0' && ch <= '9') {
+            *dst = (ch - '0') * (1 << (4 * EVEN(len)));
+            dst += ODD(len);
+            continue;
+        }
+
+        c = (u_char) (ch | 0x20); // to lowercase
+        if (c >= 'a' && c <= 'f') {
+            *dst = (ch - 'a' + 10) * (1 << (4 * EVEN(len)));
+            dst += ODD(len);
+            continue;
+        }
+
+	return NGX_ERROR;
+    }
 
     return NGX_OK;
 }
