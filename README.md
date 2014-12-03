@@ -6,24 +6,36 @@ a single session cookie, by which an individual store is identified.
 
 # How to build
 Install required packages:
-    $ sudo apt-get install build-essential libpcre3-dev zlib1g-dev \
-      libcurl4-openssl-dev redis-server libhiredis-dev libhiredis0.10 \
-      uuid-dev
+```
+$ sudo apt-get install build-essential libpcre3-dev zlib1g-dev \
+  libcurl4-openssl-dev redis-server libhiredis-dev libhiredis0.10 \
+  uuid-dev
+```
 
 Install ruby, e.g.
-    $ curl -sSL https://get.rvm.io | bash -s stable
+```
+$ curl -sSL https://get.rvm.io | bash -s stable
+```
 
 Bootstrap the development environment
-    $ rake bootstrap
+```
+$ rake bootstrap
+```
 
 Build nginx together with the module
-    $ rake nginx:compile
+```
+$ rake nginx:compile
+```
 
 Run a sample backend server
-    $ ruby backend_app.rb
+```
+$ ruby backend_app.rb
+```
 
 Run the integration tests
-    $ rake nginx:integration
+```
+$ rake nginx:integration
+```
 
 # References
 ## Tutorials and Blogs
