@@ -2,6 +2,8 @@ require 'spec_helper'
 
 describe "Integration specs" do
 
+  SESSIONID = "sessionid"
+
   before do
     @redis = Redis.new
     @redis.flushdb
@@ -19,34 +21,48 @@ describe "Integration specs" do
 
 
   describe "Use cases" do
-    it "Returns no values from redis when the guetzli session cookie is not present." do
+    it "Sets a sessionid when no session cookie is present." do
       http = Curl.get("http://127.0.0.1:8888") do |http|
         http.headers['Cookie'] = ""
       end
 
-      expect(http.headers['X-Guetzli-Debug']).to be_nil
+      cookies = get_cookies(http.header_str)
+      expect(cookies).to include (a_string_matching(/^#{SESSIONID}=/))
     end
 
-    it "Ignores invalid session cookies." do
-      @redis.set("test", "success")
+    it "Sets a new sessionid when session cookie is invalid." do
       http = Curl.get("http://127.0.0.1:8888") do |http|
-        http.headers['Cookie'] = "guetzli_sess=fail"
+        http.headers['Cookie'] = "#{SESSIONID}=invalid"
       end
 
-      headers = header_str_to_map(http.header_str)
-
-      expect(headers['X-Debug-Guetzli']).to be_nil
+      cookies = get_cookies(http.header_str)
+      expect(cookies).to include (a_string_matching(/^#{SESSIONID}=/))
     end
 
-    it "Resolves values from redis when the guetzli session cookie is present." do
-      @redis.set("test", "success")
+    it "Does not set the sessionid when the session cookie is valid." do
+      @redis.set(SESSIONID, "00000000000000000000000000000000")
       http = Curl.get("http://127.0.0.1:8888") do |http|
-        http.headers['Cookie'] = "guetzli_sess=test"
+        http.headers['Cookie'] = "#{SESSIONID}=00000000000000000000000000000000"
       end
 
-      headers = header_str_to_map(http.header_str)
+      cookies = get_cookies(http.header_str)
+      expect(cookies).not_to include (a_string_matching(/^#{SESSIONID}=/))
+    end
 
-      expect(headers['X-Guetzli-Debug']).to eq('success')
-    end    
+    it "Does not set any other cookie than the sessionid." do
+      http = Curl.get("http://127.0.0.1:8888")
+
+      cookies = get_cookies(http.header_str)
+      cookies.select!{ |c| c !~ /^#{SESSIONID}/ }
+      expect(cookies).to be_empty
+    end
+
+    it "Sets HttpOnly and secure flags to the session cookie." do
+      http = Curl.get("http://127.0.0.1:8888")
+
+      cookies = get_cookies(http.header_str)
+      session_cookie = cookies.find{ |e| e =~ /^#{SESSIONID}/}
+      expect(session_cookie).to end_with(";secure;HttpOnly")
+    end
   end
 end

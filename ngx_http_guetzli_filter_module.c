@@ -14,8 +14,6 @@
 #include <uuid/uuid.h>
 
 
-#define ODD(x) (x % 2)
-#define EVEN(x) ((x % 2) ^ 1)
 
 /* module configuration structure */
 typedef struct {
@@ -300,33 +298,3 @@ uuid_verify(ngx_str_t *in)
     return NGX_OK;
 }
 
-static ngx_int_t
-hex_decode(u_char *dst, u_char *src, size_t len)
-{
-    u_char c, ch;
-
-    if (ODD(len)) {
-       return NGX_ERROR;
-    }
-
-    while (len--) {
-        ch = *src++;
-
-        if (ch >= '0' && ch <= '9') {
-            *dst = (ch - '0') * (1 << (4 * EVEN(len)));
-            dst += ODD(len);
-            continue;
-        }
-
-        c = (u_char) (ch | 0x20); // to lowercase
-        if (c >= 'a' && c <= 'f') {
-            *dst = (ch - 'a' + 10) * (1 << (4 * EVEN(len)));
-            dst += ODD(len);
-            continue;
-        }
-
-	return NGX_ERROR;
-    }
-
-    return NGX_OK;
-}

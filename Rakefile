@@ -33,6 +33,11 @@ task :bootstrap do
   end
 end
 
+desc "Cleans the local development environment"
+task :cleanup do
+  sh "script/bootstrap clean"
+end
+
 desc "Run the integration tests"
 task :default => [:bootstrap, "nginx:start", :integration, "nginx:stop"]
 
