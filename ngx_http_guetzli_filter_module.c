@@ -44,6 +44,7 @@ static ngx_int_t redis_lookup_uuid(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t 
 static ngx_int_t redis_store_uuid(ngx_http_guetzli_loc_conf_t *conf, ngx_str_t *uuid);
 static ngx_int_t uuid_verify(ngx_str_t *in);
 static ngx_int_t hex_decode(u_char *dst, u_char *src, size_t len);
+static ngx_int_t ngx_http_guetzli_process_set_cookie_lines(ngx_http_request_t *r);
 
 /* definition of configuration directives */
 static ngx_command_t ngx_http_guetzli_commands[] = {
@@ -175,6 +176,10 @@ ngx_http_guetzli_filter(ngx_http_request_t *r)
         return ngx_http_next_header_filter(r);
     }
 
+    // process Set-Cookie headers from backend
+    ngx_http_guetzli_process_set_cookie_lines(r);
+
+    // find session cookie
     rc = ngx_http_guetzli_get_cookie(r, conf, &uuid_str);
     if (rc == NGX_OK) {
         rc = redis_lookup_uuid(conf, &uuid_str) == NGX_OK;
@@ -183,18 +188,21 @@ ngx_http_guetzli_filter(ngx_http_request_t *r)
         }
     }
 
+    // generate session cookie
     uuid_generate_random(uuid);
     uuid_str.data = ngx_pnalloc(r->pool, 33);
     uuid_str.len = 32;
     ngx_hex_dump(uuid_str.data, (u_char *)uuid, 16);
     uuid_str.data[32] = '\0';
 
+    // set session cookie
     redis_store_uuid(conf, &uuid_str);
     rc = ngx_http_guetzli_set_cookie(r, conf, &uuid_str);
 
     if (rc != NGX_OK) {
         return NGX_ERROR;
     }
+
 
     return ngx_http_next_header_filter(r);
 }
@@ -296,5 +304,35 @@ uuid_verify(ngx_str_t *in)
     }
 
     return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_guetzli_process_set_cookie_lines(ngx_http_request_t *r)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *h;
+    ngx_uint_t       i;
+
+    /* get the first part of the list. */
+    part = &r->headers_out.headers.part;
+    h = part->elts;
+
+    for (i = 0; ; i++) {
+        if (i >= part->nelts) {
+            if (part->next == NULL) {
+                /* reached the last part. */
+                break;
+            }
+            part = part->next;
+            h = part->elts;
+            i = 0;
+        }
+
+        if (ngx_strcasecmp("Set-Cookie", h[i].key.data) == 0) {
+            // for now, just disable the header 
+            // TODO: store cookies in redis
+            h[i].hash = 0;
+        }
+    }
 }
 
