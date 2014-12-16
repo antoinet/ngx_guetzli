@@ -64,5 +64,13 @@ describe "Integration specs" do
       session_cookie = cookies.find{ |e| e =~ /^#{SESSIONID}/}
       expect(session_cookie).to end_with(";secure;HttpOnly")
     end
+
+    it "Doesn't forward cookies from the browser to the backend application." do
+      http = Curl.get("http://127.0.0.1:8888") do |http|
+        http.headers['Cookie'] = "foo=bar"
+      end
+
+      expect(http.body).not_to include("foo")
+    end
   end
 end

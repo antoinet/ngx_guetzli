@@ -5,6 +5,18 @@ RSpec::Core::RakeTask.new(:integration) do |t|
   t.pattern = "spec/**/*_spec.rb"
 end
 
+namespace :sinatra do
+  desc "Starts sinatra"
+  task :start do
+    `nohup ruby spec/integration/backend_app.rb >> sinatra.log 2>&1 &`
+  end
+
+  desc "Stops sinatra"
+  task :stop do
+    `kill \`cat sinatra.pid\` && rm sinatra.pid`
+  end
+end
+
 namespace :nginx do
   desc "Starts NGINX"
   task :start do
@@ -39,5 +51,5 @@ task :cleanup do
 end
 
 desc "Run the integration tests"
-task :default => [:bootstrap, "nginx:start", :integration, "nginx:stop"]
+task :default => [:bootstrap, "sinatra:start", "nginx:start", :integration, "nginx:stop", "sinatra:stop"]
 

@@ -159,6 +159,8 @@ ngx_http_guetzli_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child)
 static ngx_int_t
 ngx_http_guetzli_filter(ngx_http_request_t *r)
 {
+    ngx_uint_t i;
+    ngx_table_elt_t *h;
     ngx_int_t rc;
     ngx_http_guetzli_loc_conf_t *conf;
     uuid_t uuid;
@@ -186,6 +188,15 @@ ngx_http_guetzli_filter(ngx_http_request_t *r)
         if (rc == NGX_OK) {
             return ngx_http_next_header_filter(r);
         }
+    }
+
+    // disable all incoming cookies
+    h = r->headers_in.cookies.elts;
+    for (i = 0; i < r->headers_in.cookies.nelts; i++) {
+      h[i].hash = 0;
+      h[i].value.data[0] = '#';
+      h[i].key.data[0] = '#';
+//      ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->pool->log, 0, "incoming cookie: \"%s: %s\"", h[i].key.data, h[i].value.data);
     }
 
     // generate session cookie

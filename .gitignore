@@ -2,3 +2,6 @@ build/
 vendor/
 Gemfile.lock
 nginx
+sinatra.pid
+sinatra.log
+core
